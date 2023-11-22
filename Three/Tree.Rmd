@@ -1,0 +1,273 @@
+---
+title: "Tree"
+output: html_document
+date: "2023-11-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library}
+library(tree)
+library(mlbench)
+library(maptree)
+library(DAAG)
+library(e1071)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+```
+
+# Задание 1
+
+```{r}
+data("Glass")
+head(Glass)
+```
+
+```{r}
+model <- tree(Type ~ ., Glass)
+draw.tree(model, cex=0.5)
+```
+
+## Интерпретация полученных результатов:
+
+Из дерева можно заметить, что оно является избыточным, так как некоторые ветвления ведут к одинаковым классам, например, 9-10.
+
+
+```{r}
+model
+```
+
+Оптимизация:
+
+1) Удаляем разветвения на одинаковые классы:
+
+```{r}
+opt_model <- snip.tree(model, nodes = c(26, 108, 31))
+draw.tree(opt_model, cex=0.5)
+```
+
+2) Избавляемся от переобучения, задавая минимальное число объектов в узле:
+
+```{r}
+pruned_model <- prune.tree(opt_model, k=10)
+draw.tree(pruned_model, cex=0.7)
+```
+
+Избавились от избыточности.
+
+# Задание 2
+
+```{r}
+data(spam7)
+head(spam7)
+```
+```{r}
+model <- tree(yesno ~ ., spam7)
+draw.tree(model, cex=0.7)
+```
+
+## Интерпретация полученных результатов:
+
+Дерево является избыточным, так как, например, ветвление bang <> 0.5155 приводит к 3 листьям с одинаковыми классами.
+
+```{r}
+pruned_model <- prune.misclass(model)
+plot(pruned_model)
+pruned_model
+```
+```{r}
+for(k in c(0.0, 4.5, 137.5)){
+  draw.tree(prune.tree(model, k = k, method = 'misclass'), cex=0.7)
+}
+```
+
+Чем выше k, тем меньше количество значимых разветвлений. При k=0 дерево уже является сбалансированным, так как отсутствуют лишние разветвления.
+
+# Задание 3
+
+```{r}
+data(nsw74psid1)
+head(nsw74psid1)
+```
+```{r}
+n <- dim(nsw74psid1)[1]
+n
+```
+
+
+```{r}
+nsw74psid1_rand <- nsw74psid1[order(runif(n)),]
+df_train <- nsw74psid1_rand[1:as.integer(n*0.9),]
+df_test <- nsw74psid1_rand[(as.integer(n*0.9)+1):n,]
+```
+
+```{r}
+model_tree <- tree(re78 ~., df_train)
+model_svm <- svm(df_train[-10], df_train$re78, type="eps-regression", cost=1, eps=0.25)
+draw.tree(model_tree, cex=0.65)
+```
+
+
+```{r}
+predict_tree <- predict(model_tree, df_test[-10])
+predict_svm <- predict(model_svm, df_test[-10])
+
+mist_tree <- sd(df_test$re78 - predict_tree)
+mist_svm <- sd(df_test$re78 - predict_svm)
+
+cat("Ошибка на тестовых данных, полученная деревом решений: ", mist_tree, "\n")
+cat("Ошибка на тестовых данных, полученная SVM: ", mist_svm)
+```
+
+Модель, построенная с помощью SVM имеет меньшую ошибку на тестовых данных.
+
+# Задание 4
+
+```{r}
+lenses <- read.table("Lenses.txt")
+lenses <- lenses[, -1]
+lenses$V6 <- as.factor(lenses$V6)
+head(lenses)
+```
+
+```{r}
+model <- tree(V6 ~., lenses)
+draw.tree(model, cex=0.7)
+```
+
+```{r}
+data_test <- data.frame(V2=2, V3=1, V4=2, V5=1)
+prediction <- predict(model, data_test)
+cat("Предсказанный класс:", prediction,"\n")
+```
+
+# Задание 5
+
+```{r}
+data("Glass")
+head(Glass)
+```
+
+```{r}
+model <- tree(Type ~ ., Glass)
+draw.tree(model, cex=0.5)
+```
+```{r}
+data_test <- data.frame(RI=1.516, Na =11.7, Mg =1.01, Al =1.19, Si =72.59, K=0.43, Ca =11.44, Ba =0.02, Fe =0.1)
+prediction <- predict(model, data_test)
+cat("Вероятности для каждого класса:", prediction)
+```
+
+# Задание 6
+
+```{r}
+train_data <- read.table("svmdata4.txt",stringsAsFactors = TRUE)
+test_data <- read.table("svmdata4test.txt",stringsAsFactors = TRUE)
+```
+
+```{r}
+# График для обучающей выборки
+plot_train <- ggplot(train_data, aes(x = X1, y = X2, color = factor(Colors))) +
+  geom_point(size = 1) +
+  labs(x = "X1", y = "X2", title = "Train Data") +
+  scale_color_manual(values = c("red" = "red", "green" = "green")) +
+  theme_minimal() +
+  theme(aspect.ratio = 1, legend.position = "none")
+
+# График для тестовой выборки
+plot_test <- ggplot(test_data, aes(x = X1, y = X2, color = factor(Colors))) +
+  geom_point(size = 1) +
+  labs(x = "X1", y = "X2", title = "Test Data") +
+  scale_color_manual(values = c("red" = "red", "green" = "green")) + 
+  theme_minimal() +
+  theme(aspect.ratio = 1, legend.position = "none")
+
+grid.arrange(plot_train, plot_test, ncol = 2)
+```
+
+```{r}
+model <- tree(Colors ~ ., train_data)
+draw.tree(model, cex=0.7)
+```
+
+В листьях 2-3 одинаковые классы, попробуем оптимизировать дерево.
+
+```{r}
+model
+```
+
+```{r}
+opt_model <- snip.tree(model, nodes = c(9))
+draw.tree(opt_model, cex=0.5)
+```
+```{r}
+pruned_model <- prune.tree(opt_model, k=10)
+draw.tree(pruned_model, cex=0.7)
+```
+```{r}
+predict_tree <- predict(pruned_model, test_data[-3])
+
+predicted_classes <- ifelse(predict_tree[, "red"] > predict_tree[, "green"], "red", "green")
+
+conf_matrix <- table(test_data$Colors, predicted_classes)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+cat("Accuracy:", accuracy, "\n")
+```
+
+# Задание 7
+
+```{r}
+train_data <- read.csv("Titanic_train.csv",stringsAsFactors = TRUE)
+test_data <- read.csv("Titanic_test.csv",stringsAsFactors = TRUE)
+```
+
+```{r}
+# Подготовка данных
+preprocess_data <- function(data) {
+  # Удаление столбцов
+  columns_to_drop <- c("Name", "Ticket", "Cabin", "PassengerId")
+  data <- data[, !(names(data) %in% columns_to_drop)]
+  
+  # Заполнение пропущенных значений
+  data <- data %>%
+    mutate(Age = ifelse(is.na(Age), mean(Age, na.rm = TRUE), Age),
+           Fare = ifelse(is.na(Fare), mean(Fare, na.rm = TRUE), Fare),
+           Embarked = ifelse(is.na(Embarked), levels(Embarked)[which.max(table(Embarked))], Embarked),
+           Sex = ifelse(is.na(Sex), levels(Sex)[which.max(table(Sex))], Sex))
+  
+  # Преобразование категориальных переменных
+  categorical_features <- c("Sex", "Embarked")
+  
+  for (feature in categorical_features) {
+    data[[feature]] <- as.factor(data[[feature]])
+  }
+  return(data)
+}
+```
+
+```{r}
+train_data_preprocessed <- preprocess_data(train_data)
+train_data_preprocessed$Survived <- as.factor(train_data_preprocessed$Survived)
+head(train_data_preprocessed)
+```
+
+```{r}
+model <- tree(Survived ~., train_data_preprocessed)
+draw.tree(model, cex=0.7)
+```
+
+```{r}
+test_data_preprocessed <- preprocess_data(test_data)
+predict_tree <- predict(model, test_data_preprocessed)
+
+predicted_classes <- ifelse(predict_tree[, '1'] > predict_tree[, '0'], 1, 0)
+class_counts <- table(predicted_classes)
+
+cat("Количество выживших: ", class_counts[1])
+```
+
+
