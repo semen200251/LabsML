@@ -1,0 +1,416 @@
+---
+title: "Регрессия"
+author: "Хомец Семён"
+date: "2023-12-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library}
+library(plotly)
+library(datasets)
+library(dplyr)
+library(MASS)
+library(glmnet)
+library(ridge)
+library(zoo)
+```
+
+# Задание 1
+
+Загрузите данные из файла reglab1.txt. Используя функцию lm, постройте регрессию (используйте разные модели). Выберите наиболее подходящую модель, объясните свой выбор.
+
+```{r get_data_task1}
+data <- read.table("reglab1.txt", header = TRUE)
+head(data)
+```
+```{r split_data_task1}
+n <- dim(data)[1]
+
+data_rand <- data[order(runif(n)),]
+df_train <- data_rand[1:as.integer(n*0.8),]
+df_test <- data_rand[(as.integer(n*0.8)+1):n,]
+```
+
+```{r show_data_task1}
+plot_ly(data = df_train) %>%
+  add_markers(
+    z = ~z, x = ~x, y = ~y,
+    opacity = 0.7,
+    size = I(100)
+  ) %>%
+  layout(title = "Training Data")
+
+plot_ly(data = df_test) %>%
+  add_markers(
+    z = ~z, x = ~x, y = ~y,
+    opacity = 0.7,
+    size = I(100)
+  ) %>%
+  layout(title = "Test Data")
+```
+
+```{r build_regression_task1}
+model1 <- lm(z ~ ., df_train)
+predicted_z <- predict(model1, df_test)
+
+model2 <- lm(y ~ ., df_train)
+predicted_y <- predict(model2, df_test)
+
+model3 <- lm(x ~ ., df_train)
+predicted_x <- predict(model3, df_test)
+
+# Ошибки для моделей
+mist_z <- sd(df_test$z - predicted_z)
+model1
+cat("Ошибка на тестовых данных: ", mist_z, "\n")
+
+mist_y <- sd(df_test$y - predicted_y)
+model2
+cat("Ошибка на тестовых данных: ", mist_y, "\n")
+
+mist_x <- sd(df_test$x - predicted_x)
+model3
+cat("Ошибка на тестовых данных: ", mist_x, "\n")
+```
+
+## Вывод 
+
+Наиболее подходящая модель - модель y, так как меньше ошибка на тестовых данных.
+
+# Задание 2
+
+Реализуйте следующий алгоритм для уменьшения количества признаков, используемых для построения регрессии: для каждого k из {0,1,...,d} выбрать подмножество признаков мощности k^1, минимизирующее остаточную сумму квадратов RSS. Используя полученный алгоритм, выберите оптимальное подможество признаков для данных из файла reglab2.txt. Объясните свой выбор. Для генерации всех возможных сочетаний по m элементов из некоторого множества x можно использовать функцию combn(x, m, ...). 
+
+```{r get_data_task2}
+data <- read.table("reglab2.txt", header = TRUE)
+head(data)
+```
+
+```{r count_rss}
+compute_RSS <- function(features, data) {
+  formula <- as.formula(paste("y ~", paste(features, collapse = " + ")))
+  model <- lm(formula, data = data)
+  RSS <- sum(model$residuals^2)
+  return(RSS)
+}
+```
+
+```{r optimal_subset}
+find_optimal_subset_lm <- function(data) {
+  p <- ncol(data) - 1
+  features <- colnames(data)[-1]
+
+  best_RSS <- Inf
+  best_subset <- NULL
+
+  all_results <- list()
+
+  # Итерация по всем возможным размерам подмножества
+  for (m in 1:p) {
+    
+    subsets <- combn(features, m, simplify = TRUE)
+
+    # Итерация по всем возможным сочетаниям признаков данного размера
+    for (i in 1:ncol(subsets)) {
+      current_subset <- subsets[, i]
+      current_RSS <- compute_RSS(current_subset, data)
+
+      all_results[[length(all_results) + 1]] <- list(subset = current_subset, RSS = current_RSS)
+
+      if (current_RSS < best_RSS) {
+        best_RSS <- current_RSS
+        best_subset <- current_subset
+      }
+    }
+  }
+  
+  return(list(all_results = all_results, optimal_subset = best_subset, optimal_RSS = best_RSS))
+}
+```
+
+```{r result_task2}
+result <- find_optimal_subset_lm(data)
+
+cat("Все подмножества и их RSS:\n")
+for (i in seq_along(result$all_results)) {
+  cat("Подмножество:", paste(result$all_results[[i]]$subset, collapse = ", "), " | RSS:", result$all_results[[i]]$RSS, "\n")
+}
+
+cat("\nОптимальное подмножество признаков:", paste(result$optimal_subset, collapse = ", "), "\n")
+cat("Максимальная остаточная сумма квадратов (RSS):", result$optimal_RSS, "\n")
+```
+
+# Задание 3
+
+Загрузите данные из файла cygage.txt. Постройте регрессию, выражающую зависимость возраста исследуемых отложений от глубины залегания, используя веса наблюдений. Оцените качество построенной модели.
+
+```{r get_data_task3}
+data <- read.table("cygage.txt", header = TRUE)
+head(data)
+```
+
+```{r show_data_task3}
+plot(data, col = 'blue')
+```
+
+```{r build_model_task3}
+model <- lm(calAge ~ Depth, data, weights = data$Weight)
+
+summary <- summary(model)
+mid_error = mean(summary$residuals^2)
+cat("Среднеквадратичная ошибка (MSE):", mid_error, "\n")
+```
+
+# Задание 4
+
+Загрузите данные Longley (макроэкономические данные). Данные состоят из 7 экономических переменных, наблюдаемых с 1947 по 1962 годы (n=16):
+GNP.deflator - дефлятор цен,
+GNP - валовой национальный продукт, 
+Unemployed – число безработных
+Armed.Forces – число людей в армии
+Population – население, возраст которого старше 14 лет
+Year - год
+Employed – количество занятых 
+Построить регрессию lm(Employed ~ .).
+Исключите из набора данных longley переменную "Population". Разделите данные на тестовую и обучающую выборки равных размеров случайным образом. Постройте гребневую регрессию для значений lambda=10^(-3+0.2*i), i=0,...,25, подсчитайте ошибку на тестовой и обучающей выборке для данных значений λ, постройте графики. Объясните полученные результаты.
+
+```{r get_data_task4}
+data(longley)
+head(longley)
+```
+
+```{r build_model1_task4}
+model <- lm(Employed ~ ., longley)
+
+summary <- summary(model)
+mid_error = mean(summary$residuals^2)
+cat("Среднеквадратичная ошибка (MSE):", mid_error, "\n")
+```
+
+```{r prepare_and_split_data_task4}
+longley$Population <- NULL
+n <- dim(longley)[1]
+
+longley_rand <- longley[order(runif(n)),]
+df_train <- longley_rand[1:as.integer(n*0.8),]
+df_test <- longley_rand[(as.integer(n*0.8)+1):n,]
+```
+
+```{r build_model2_task4}
+lambda_values <- 10^seq(-3, 2, by = 0.2)
+train_error <- numeric(length(lambda_values))
+test_error <- numeric(length(lambda_values))
+
+for (i in seq_along(lambda_values)) {
+  lambda <- lambda_values[i]
+  model <- lm.ridge(Employed ~ ., df_train, lambda = lambda)
+
+  coef_values <- as.matrix(coef(model))
+
+  train_pred <- as.matrix(cbind(1, df_train[, -ncol(df_train)])) %*% coef_values
+  test_pred <- as.matrix(cbind(1, df_test[, -ncol(df_test)])) %*% coef_values
+
+  train_error[i] <- mean((train_pred - df_train$Employed)^2)
+  test_error[i] <- mean((test_pred - df_test$Employed)^2)
+}
+
+plot(log10(lambda_values), train_error, type = "l", col = "blue", xlab = "log10(lambda)", ylab = "MSE", main = "Гребневая регрессия")
+lines(log10(lambda_values), test_error, type = "l", col = "red")
+legend("topright", legend = c("Обучающая выборка", "Тестовая выборка"), col = c("blue", "red"), lty = 1)
+
+```
+
+Из графика видно, что среднеквадратичная ошибка на обучающей выборке больше, чем на тестовой. Причем при увеличении lambda, ошибка растет.
+
+# Задание 5
+
+Загрузите данные EuStockMarkets из пакета « datasets». Данные содержат ежедневные котировки на момент закрытия фондовых бирж: Germany DAX (Ibis), Switzerland SMI, France CAC, и UK FTSE. Постройте на одном графике все кривые изменения котировок во времени. Постройте линейную регрессию для каждой модели в отдельности и для всех моделей вместе. Оцените, какая из бирж имеет наибольшую динамику.
+
+```{r get_data_task5}
+data(EuStockMarkets)
+head(EuStockMarkets)
+```
+```{r show_data_task5}
+plot(EuStockMarkets[,1], type = "l", xlab="Time", ylab="Closing Price", col="black")
+lines(EuStockMarkets[,2], type = "l", col="red")
+lines(EuStockMarkets[,3], type = "l", col="green")
+lines(EuStockMarkets[,4], type = "l", col="blue")
+legend("topleft", legend = colnames(EuStockMarkets), col = 1:4, lty = 1)
+```
+
+```{r models_task5}
+model1 <- lm(DAX ~ time(EuStockMarkets), EuStockMarkets)
+model2 <- lm(SMI ~ time(EuStockMarkets), EuStockMarkets)
+model3 <- lm(CAC ~ time(EuStockMarkets), EuStockMarkets)
+model4 <- lm(FTSE ~ time(EuStockMarkets), EuStockMarkets)
+model5 <- lm(DAX+SMI+CAC+FTSE ~ time(EuStockMarkets), EuStockMarkets)
+
+cat("-----------Регрессия для DAX----------- \n")
+model1
+cat("-----------Регрессия для SMI----------- \n")
+model2
+cat("-----------Регрессия для CAC----------- \n")
+model3
+cat("-----------Регрессия для FTSE----------- \n")
+model4
+cat("-----------Регрессия для всех----------- \n")
+model5
+```
+
+Из результатов видим, что наибольшую динамику имеет SMI, так как у неё самый большой коэффициент при параметре time.
+
+# Задание 6
+
+Загрузите данные JohnsonJohnson из пакета «datasets». Данные содержат поквартальную прибыль компании Johnson & Johnson с 1960 по 1980 гг. Постройте на одном графике все кривые изменения прибыли во времени. Постройте линейную регрессию для каждого квартала в отдельности и для всех кварталов вместе. Оцените, в каком квартале компания имеет наибольшую и наименьшую динамику доходности. Сделайте прогноз по прибыли в 2016 году во всех кварталах и в среднем по году.
+
+```{r get_data_task6}
+data(JohnsonJohnson)
+JohnsonJohnson
+```
+
+```{r show_data_task6}
+time_labels <- time(JohnsonJohnson)[seq(from = 1, to = length(JohnsonJohnson), by = 4)]
+col_names <- c('Qtr1','Qtr2','Qtr3','Qtr4')
+Qtr1 <- JohnsonJohnson[seq(from = 1, to = length(JohnsonJohnson), by = 4)]
+Qtr2 <- JohnsonJohnson[seq(from = 2, to = length(JohnsonJohnson), by = 4)]
+Qtr3 <- JohnsonJohnson[seq(from = 3, to = length(JohnsonJohnson), by = 4)]
+Qtr4 <- JohnsonJohnson[seq(from = 4, to = length(JohnsonJohnson), by = 4)]
+
+plot(time_labels, Qtr1, type = "l", xlab = "Время", ylab = "Кривая", col = "black")
+lines(time_labels, Qtr2, type = "l", col = "red")
+lines(time_labels, Qtr3, type = "l", col = "green")
+lines(time_labels, Qtr4, type = "l", col = "blue")
+
+legend("topleft", legend = col_names, col = 1:4, lty = 1)
+```
+
+```{r models_task6}
+model1 <- lm(Qtr1 ~ time_labels, JohnsonJohnson)
+model2 <- lm(Qtr2 ~ time_labels, JohnsonJohnson)
+model3 <- lm(Qtr3 ~ time_labels, JohnsonJohnson)
+model4 <- lm(Qtr4 ~ time_labels, JohnsonJohnson)
+model5 <- lm(Qtr1 + Qtr2 + Qtr3 + Qtr4 ~ time_labels, JohnsonJohnson)
+
+cat("-----------Регрессия для Qtr1----------- \n")
+model1
+cat("-----------Регрессия для Qtr2----------- \n")
+model2
+cat("-----------Регрессия для Qtr3----------- \n")
+model3
+cat("-----------Регрессия для Qtr4----------- \n")
+model4
+cat("-----------Регрессия для всех----------- \n")
+model5
+```
+
+Из результатов видим, что наибольшая динамика наблюдается в 3 квартале, так как у него самый большой коэффициент при параметре time. Наименьшая же динамика наблюдается в 4 квартале.
+
+```{r predict_task6}
+predict1 = coef(model1)[1]+coef(model1)[2]*2016
+predict2 = coef(model2)[1]+coef(model2)[2]*2016
+predict3 = coef(model3)[1]+coef(model3)[2]*2016
+predict4 = coef(model4)[1]+coef(model4)[2]*2016
+predict5 = (coef(model5)[1]+coef(model5)[2]*2016)/4
+
+cat("Прогноз прибыли в 2016 году для Qtr1: ", predict1, "\n")
+cat("Прогноз прибыли в 2016 году для Qtr2: ", predict2, "\n")
+cat("Прогноз прибыли в 2016 году для Qtr3: ", predict3, "\n")
+cat("Прогноз прибыли в 2016 году для Qtr4: ", predict4, "\n")
+cat("Прогноз прибыли в 2016 году в среднем по году: ", predict5, "\n")
+```
+
+# Задание 7
+
+Загрузите данные sunspot.year из пакета «datasets». Данные содержат количество солнечных пятен с 1700 по 1988 гг. Постройте на графике кривую изменения числа солнечных пятен во времени. Постройте линейную регрессию для данных. 
+
+```{r get_data_task7}
+data(sunspot.year)
+sunspot.year
+```
+
+```{r show_data_task7}
+plot(sunspot.year, col='blue')
+```
+
+```{r models_task7}
+model <- lm(sunspot.year[seq(1,length(sunspot.year),1)] ~ seq(1700,1988,1), sunspot.year)
+
+cat("-----------Регрессия----------- \n")
+model
+
+summary <- summary(model)
+mid_error = mean(summary$residuals^2)
+cat("Среднеквадратичная ошибка (MSE):", mid_error, "\n")
+```
+
+# Задание 8
+
+Загрузите данные из файла пакета «UKgas.scv». Данные содержат объемы ежеквартально потребляемого газа в Великобритании с 1960 по 1986 гг. Постройте линейную регрессию для каждого квартала в отдельности и для всех кварталов вместе. Оцените, в каком квартале потребление газа имеет наибольшую и наименьшую динамику доходности. Сделайте прогноз по потреблению газа в 2016 году во всех кварталах и в среднем по году.
+
+```{r get_data_task8}
+data <- read.csv("UKgas.csv", stringsAsFactors = TRUE)
+head(data)
+
+Qtr1 <- UKgas[seq(from = 1, to = dim(data)[1], by = 4)]
+Qtr2 <- UKgas[seq(from = 2, to = dim(data)[1], by = 4)]
+Qtr3 <- UKgas[seq(from = 3, to = dim(data)[1], by = 4)]
+Qtr4 <- UKgas[seq(from = 4, to = dim(data)[1], by = 4)]
+```
+
+```{r models_task8}
+model1 <- lm(Qtr1 ~ time[seq(from = 1, to = dim(data)[1], by = 4)], data)
+model2 <- lm(Qtr2 ~ time[seq(from = 2, to = dim(data)[1], by = 4)], data)
+model3 <- lm(Qtr3 ~ time[seq(from = 3, to = dim(data)[1], by = 4)], data)
+model4 <- lm(Qtr4 ~ time[seq(from = 4, to = dim(data)[1], by = 4)], data)
+model5 <- lm(Qtr1 + Qtr2 + Qtr3 + Qtr4 ~ time[seq(from = 1, to = dim(data)[1], by = 4)], data)
+
+cat("-----------Регрессия для Qtr1----------- \n")
+model1
+cat("-----------Регрессия для Qtr2----------- \n")
+model2
+cat("-----------Регрессия для Qtr3----------- \n")
+model3
+cat("-----------Регрессия для Qtr4----------- \n")
+model4
+cat("-----------Регрессия для всех----------- \n")
+model5
+```
+
+Из результатов видим, что наибольшая динамика наблюдается в 1 квартале, так как у него самый большой коэффициент при параметре time. Наименьшая же динамика наблюдается в 3 квартале.
+
+```{r predict_task8}
+predict1 = coef(model1)[1]+coef(model1)[2]*2016
+predict2 = coef(model2)[1]+coef(model2)[2]*2016
+predict3 = coef(model3)[1]+coef(model3)[2]*2016
+predict4 = coef(model4)[1]+coef(model4)[2]*2016
+predict5 = (coef(model5)[1]+coef(model5)[2]*2016)/4
+
+cat("Прогноз прибыли в 2016 году для Qtr1: ", predict1, "\n")
+cat("Прогноз прибыли в 2016 году для Qtr2: ", predict2, "\n")
+cat("Прогноз прибыли в 2016 году для Qtr3: ", predict3, "\n")
+cat("Прогноз прибыли в 2016 году для Qtr4: ", predict4, "\n")
+cat("Прогноз прибыли в 2016 году в среднем по году: ", predict5, "\n")
+```
+
+# Задание 9
+
+Загрузите данные cars из пакета «datasets». Данные содержат зависимости тормозного пути автомобиля (футы) от его скорости (мили в час). Данные получены в 1920 г. Постройте регрессионную модель и оцените длину тормозного пути при скорости 40 миль в час. 
+
+```{r get_data_task9}
+data(cars)
+head(cars)
+```
+
+```{r models_task9}
+model <- lm(dist ~ speed, cars)
+
+cat("-----------Регрессия----------- \n")
+model
+
+predict = coef(model)[1]+coef(model)[2]*40
+cat("Прогноз длины тормозного пути при скорости 40 миль в час: ", predict, "\n")
+```
